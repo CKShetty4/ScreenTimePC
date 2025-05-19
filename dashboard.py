@@ -2,11 +2,28 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import matplotlib.pyplot as plt
-from datetime import datetime
-import time
+from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
+def ensure_table_exists():
+    conn = sqlite3.connect('activity_log.db')
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS activity_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            app_name TEXT,
+            window_title TEXT,
+            start_time TEXT,
+            end_time TEXT,
+            duration REAL,
+            category TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
 
+# Call at the start
+ensure_table_exists()
 
 def load_data():
     conn = sqlite3.connect('activity_log.db')
@@ -28,8 +45,13 @@ def categorize(row):
         return "Learning"
     else:
         return row.get("category", "Uncategorized")
+
+def seconds_to_hms(seconds):
+    return str(timedelta(seconds=int(seconds)))
+
 # Refresh every 10 seconds
 count = st_autorefresh(interval=10_000, key="datarefresh")
+
 def main():
     st.sidebar.title("Filters")
     selected_date = st.sidebar.date_input("Select Date", datetime.now().date())
@@ -44,6 +66,9 @@ def main():
 
     filtered_df = df[df['date'] == selected_date]
 
+    # Add human-readable duration column
+    filtered_df['duration_hms'] = filtered_df['duration'].apply(seconds_to_hms)
+
     if st.sidebar.checkbox("Show raw data"):
         st.write(filtered_df)
 
@@ -51,8 +76,16 @@ def main():
     st.subheader(f"Summary for {selected_date}")
 
     summary = filtered_df.groupby('category')['duration'].sum().sort_values(ascending=False)
+
+    # Show bar chart with numeric duration (seconds)
     st.bar_chart(summary)
 
+    # Show human-readable summary table
+    st.write("Duration by Category (HH:MM:SS):")
+    summary_hms = summary.apply(seconds_to_hms)
+    st.dataframe(summary_hms)
+
+    # Pie chart with numeric values
     fig, ax = plt.subplots()
     ax.pie(summary, labels=summary.index, autopct='%1.1f%%', startangle=90)
     ax.axis('equal')
@@ -61,6 +94,9 @@ def main():
     st.subheader("🔍 Application Usage")
     app_summary = filtered_df.groupby('app_name')['duration'].sum().sort_values(ascending=False).head(10)
     st.bar_chart(app_summary)
+    st.write("App Usage Durations (HH:MM:SS):")
+    app_summary_hms = app_summary.apply(seconds_to_hms)
+    st.dataframe(app_summary_hms)
 
     st.subheader("🖥️ Top Window Titles")
     title_summary = filtered_df.groupby('window_title')['duration'].sum().sort_values(ascending=False).head(10)
@@ -70,7 +106,6 @@ def main():
         filename = f"activity_{selected_date}.csv"
         filtered_df.to_csv(filename, index=False)
         st.success(f"Exported as {filename}")
-
 
 if __name__ == "__main__":
     main()
